@@ -19,6 +19,18 @@ import {
   VICTORY,
 } from "./poses.ts";
 import { atRest, isResting, stepSpring, type Spring } from "./spring.ts";
+import {
+  createTie,
+  kickTie,
+  pinTie,
+  settleTie,
+  staticTie,
+  staticTieAngle,
+  stepTie,
+  tieForces,
+  type Tie,
+  type TieMood,
+} from "./tie.ts";
 import type { Point, Pose, RunnerInput, Skeleton } from "./types.ts";
 import { smoothTowards } from "./typing.ts";
 
@@ -104,6 +116,9 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
     nextBlink: performance.now() + rand(1200, 3500),
     endSince: 0, // when the end pose (panting / victory) started, 0 = not ending
     lastPose: STAND as Pose,
+    tie: null as Tie | null, // created on the first draw, once the collar is known
+    collar: null as Point | null, // where the tie's knot is pinned, updated every draw
+    victoryKicked: false,
   };
 
   let raf = 0;
@@ -135,6 +150,8 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
     s.stumbleUntil = now + STUMBLE_MS;
     if (big) s.bigUntil = now + BIG_STUMBLE_MS;
     if (!reduce) {
+      // The tie whips forward and up into his face, then falls back on its own.
+      if (s.tie) kickTie(s.tie, big ? 470 : 360, big ? -950 : -720);
       const foot = BELT_Y - 2;
       const x = HIP_X + 14;
       s.puffs = s.puffs.filter((p) => now - p.born < 450).slice(-6);
@@ -157,7 +174,16 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
     s.drops = [];
     s.endSince = 0;
     s.lastPose = STAND;
+    s.victoryKicked = false;
+    if (s.tie && s.collar) settleTie(s.tie, s.collar);
     draw(performance.now());
+  }
+
+  /** What the tie is doing, from the round and the figure's state. */
+  function tieMood(input: RunnerInput): TieMood {
+    if (s.endSince) return input.newBest ? "victory" : "limp";
+    if (input.phase === "finished") return "limp"; // winding down, out of breath
+    return s.speed < 1 ? "stand" : "move";
   }
 
   // --- simulation ---------------------------------------------------------
@@ -180,6 +206,23 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
     const ending = input.phase === "finished" && s.speed < 15;
     if (ending && !s.endSince) s.endSince = now;
     if (!ending) s.endSince = 0;
+
+    // The tie: simulated every frame (drawn at the choppy rate like the rest).
+    if (s.tie && s.collar && !reduce) {
+      const mood = tieMood(input);
+      if (mood === "victory" && !s.victoryKicked) {
+        kickTie(s.tie, -520, -1000); // swings up with his arms, out past his shoulder
+        s.victoryKicked = true;
+      }
+      let forces = tieForces(mood, s.speed, m.sprint, s.tie.time);
+      // Victory: an updraft holds it up while the arms go up, then it drops back down.
+      if (mood === "victory" && now - s.endSince < 1300) {
+        const hold = Math.min(1, 1.6 * (1 - (now - s.endSince) / 1300));
+        forces = { ...forces, windX: -1150 * hold, windY: -1550 * hold, flap: 300 * hold, flapHz: 6 };
+      }
+      if (stumbling) forces = { ...forces, windX: forces.windX * 0.25, windY: forces.windY * 0.25, flap: forces.flap * 0.5 };
+      stepTie(s.tie, s.collar, forces, dt);
+    }
 
     // Blinking (standing, walking, or panting at the end).
     if (now > s.nextBlink) {
@@ -282,12 +325,13 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
   }
 
   // --- drawing ------------------------------------------------------------
-  function colors(): { ink: string; signal: string; lcdBg: string; lcdInk: string; ground: string } {
+  function colors(): { ink: string; accent: string; lcdBg: string; lcdInk: string; ground: string } {
     const cs = getComputedStyle(canvas);
     const v = (name: string, fallback: string): string => cs.getPropertyValue(name).trim() || fallback;
     return {
       ink: v("--ink", "#121212"),
-      signal: v("--signal", "#ff5a1f"),
+      // cosmo030.com's orange (--color-signal there). The tie's colour.
+      accent: v("--accent", "#ff5a1f"),
       lcdBg: v("--lcd-bg", "#a7ad97"),
       lcdInk: v("--lcd-ink", "#1b2014"),
       ground: v("--ground", "#9b9b98"),
@@ -317,14 +361,21 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
 
     const { pose, offset } = currentPose(now, input, boilTick);
     const sk = skeleton(pose, HIP_X, BELT_Y, offset);
+    // The tie's knot sits just under the chin.
+    s.collar = [sk.neck[0] + (sk.shoulder[0] - sk.neck[0]) * 0.3, sk.neck[1] + (sk.shoulder[1] - sk.neck[1]) * 0.3];
+    if (!s.tie) s.tie = createTie(s.collar);
+    else pinTie(s.tie, s.collar);
+    const tiePts: readonly Point[] = reduce
+      ? staticTie(s.collar, staticTieAngle(tieMood(input), s.speed, pose.lean))
+      : s.tie.pts;
 
     drawTreadmillBase(o);
     drawSpeedLines(sk, o);
-    drawFigure(sk, o, 0.45); // far limbs, faint
+    drawFigure(sk, o, 0.45, tiePts, c.accent); // far limbs, faint
     drawRail(o);
-    drawFigure(sk, o, 1);
-    drawFace(now, input, sk, o, c.signal);
-    drawEffects(now, sk, o, c.signal);
+    drawFigure(sk, o, 1, tiePts, c.accent);
+    drawFace(now, input, sk, o);
+    drawEffects(now, sk, o, c.accent);
     drawConsole(input, o, c);
   }
 
@@ -371,7 +422,7 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
     );
   }
 
-  function drawFigure(sk: Skeleton, o: (e?: Rough) => Rough, layer: number): void {
+  function drawFigure(sk: Skeleton, o: (e?: Rough) => Rough, layer: number, tie: readonly Point[], accent: string): void {
     const limb = (a: Point, b: Point, c: Point, w: number): void =>
       void rc.linearPath([pt(a), pt(b), pt(c)], o({ strokeWidth: w }));
     if (layer < 1) {
@@ -382,6 +433,7 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
       return;
     }
     rc.line(sk.neck[0], sk.neck[1], sk.hip[0], sk.hip[1], o({ strokeWidth: 2.3 }));
+    drawTie(tie, o, accent);
     limb(sk.hip, sk.kneeNear, sk.footNear, 2.3);
     limb(sk.shoulder, sk.elbowNear, sk.handNear, 2.2);
     // Head: drawn over the body with the page colour behind, like a solid shape.
@@ -392,7 +444,51 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
     rc.circle(sk.head[0], sk.head[1], HEAD_R * 2, o({ strokeWidth: 2.2 }));
   }
 
-  function drawFace(now: number, input: RunnerInput, sk: Skeleton, o: (e?: Rough) => Rough, signal: string): void {
+  /**
+   * The tie, drawn through the chain points: a tapered blade that widens towards
+   * a pointed tip, and a small knot. Orange fill, pencil outline.
+   */
+  function drawTie(pts: readonly Point[], o: (e?: Rough) => Rough, accent: string): void {
+    const n = pts.length;
+    if (n < 2) return;
+    const at = (i: number): Point => pts[Math.min(n - 1, Math.max(0, i))] ?? [0, 0];
+    const unit = (a: Point, b: Point): Point => {
+      const dx = b[0] - a[0];
+      const dy = b[1] - a[1];
+      const d = Math.hypot(dx, dy) || 1;
+      return [dx / d, dy / d];
+    };
+    const left: [number, number][] = [];
+    const right: [number, number][] = [];
+    for (let i = 0; i < n; i++) {
+      const d = unit(at(i - 1), at(i + 1));
+      const half = 1.4 + (3.2 * i) / (n - 1); // narrow at the knot, wide at the bottom
+      const p = at(i);
+      left.push([p[0] - d[1] * half, p[1] + d[0] * half]);
+      right.push([p[0] + d[1] * half, p[1] - d[0] * half]);
+    }
+    const end = unit(at(n - 2), at(n - 1));
+    const last = at(n - 1);
+    const tip: [number, number] = [last[0] + end[0] * 5, last[1] + end[1] * 5];
+    const fill = (extra: Rough = {}): Rough =>
+      o({ fill: accent, fillStyle: "solid", strokeWidth: 1.1, roughness: 0.7, bowing: 0.4, ...extra });
+    rc.polygon([...left, tip, ...right.reverse()], fill());
+
+    // Knot: a little diamond at the collar.
+    const k = at(0);
+    const d = unit(k, at(1));
+    rc.polygon(
+      [
+        [k[0] - d[0] * 3, k[1] - d[1] * 3],
+        [k[0] - d[1] * 2.8, k[1] + d[0] * 2.8],
+        [k[0] + d[0] * 2.6, k[1] + d[1] * 2.6],
+        [k[0] + d[1] * 2.8, k[1] - d[0] * 2.8],
+      ],
+      fill({ roughness: 0.4 }),
+    );
+  }
+
+  function drawFace(now: number, input: RunnerInput, sk: Skeleton, o: (e?: Rough) => Rough): void {
     const [hx, cy] = sk.head;
     const cx = hx + 3; // looking a little forward, the way it runs
     const fine = (extra: Rough = {}): Rough => o({ roughness: 0.6, bowing: 0.5, strokeWidth: 1.8, ...extra });
@@ -477,7 +573,8 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
 
     // Sprinting: a sweatband with its tails flapping behind.
     if (gait === "sprint") {
-      const band = (extra: Rough = {}): Rough => o({ stroke: signal, strokeWidth: 3, roughness: 0.7, bowing: 0.6, ...extra });
+      // Pencil, not orange: the tie is the only coloured thing on him.
+      const band = (extra: Rough = {}): Rough => o({ strokeWidth: 3, roughness: 0.7, bowing: 0.6, ...extra });
       rc.arc(hx, cy + 2, HEAD_R * 2 + 1, HEAD_R * 2 - 6, Math.PI * 1.08, Math.PI * 1.92, false, band());
       const flap = reduce ? 0 : (Math.floor(now / 80) % 2) * 4 - 2;
       const bx = hx - HEAD_R + 1;
@@ -501,7 +598,7 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
     ctx.globalAlpha = 1;
   }
 
-  function drawEffects(now: number, sk: Skeleton, o: (e?: Rough) => Rough, signal: string): void {
+  function drawEffects(now: number, sk: Skeleton, o: (e?: Rough) => Rough, accent: string): void {
     const [hx, cy] = sk.head;
     const fine = (extra: Rough = {}): Rough => o({ roughness: 0.4, bowing: 0.3, strokeWidth: 1.2, ...extra });
 
@@ -539,8 +636,8 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
       for (let i = 0; i < count; i++) {
         const x = hx + HEAD_R + 8 + i * 9;
         const y = cy - HEAD_R - 6 - i * 2;
-        rc.line(x, y - 14, x + 1.5, y + 2, o({ stroke: signal, strokeWidth: 2.8, roughness: 0.8 }));
-        rc.circle(x + 2, y + 8, 3.2, o({ stroke: signal, fill: signal, fillStyle: "solid", strokeWidth: 1, roughness: 0.3 }));
+        rc.line(x, y - 14, x + 1.5, y + 2, o({ stroke: accent, strokeWidth: 2.8, roughness: 0.8 }));
+        rc.circle(x + 2, y + 8, 3.2, o({ stroke: accent, fill: accent, fillStyle: "solid", strokeWidth: 1, roughness: 0.3 }));
       }
     }
   }
@@ -571,7 +668,7 @@ export function createRunner(canvas: HTMLCanvasElement, source: () => RunnerInpu
 
     // Power light and two buttons under the screen.
     const on = input.phase === "running";
-    rc.circle(x + 4, y + h + 6, 4, o({ stroke: on ? c.signal : c.ink, fill: on ? c.signal : "transparent", fillStyle: "solid", strokeWidth: 1, roughness: 0.4 }));
+    rc.circle(x + 4, y + h + 6, 4, o({ stroke: on ? c.accent : c.ink, fill: on ? c.accent : "transparent", fillStyle: "solid", strokeWidth: 1, roughness: 0.4 }));
     rc.line(x + w - 26, y + h + 6, x + w - 18, y + h + 6, o({ strokeWidth: 1.6, roughness: 0.6 }));
     rc.line(x + w - 12, y + h + 6, x + w - 4, y + h + 6, o({ strokeWidth: 1.6, roughness: 0.6 }));
   }

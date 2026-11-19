@@ -10,7 +10,8 @@
   --line: rgb(18 18 18 / 0.35);
   --line-soft: rgb(18 18 18 / 0.18);
   --panel: rgb(18 18 18 / 0.06);
-  --signal: #ff5a1f;
+  /* cosmo030.com's accent (--color-signal there), same in both themes. The mascot's tie. */
+  --accent: #ff5a1f;
   --lcd-bg: #a9af98;
   --lcd-ink: #1b2014;
   --font: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -224,7 +225,7 @@ button {
 
 /* A finished word with a mistake: wavy orange underline. */
 .word.bad {
-  text-decoration: underline wavy var(--signal);
+  text-decoration: underline wavy var(--accent);
   text-decoration-thickness: 1.5px;
   text-underline-offset: 5px;
 }
@@ -236,7 +237,7 @@ button {
 /* Wrong letters: ink on an orange block, readable in both themes. */
 .l.wrong,
 .l.extra {
-  background: var(--signal);
+  background: var(--accent);
   color: #121212;
 }
 
@@ -320,7 +321,7 @@ button {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--signal);
+  background: var(--accent);
 }
 
 /* --- results ---------------------------------------------------------- */
@@ -374,7 +375,7 @@ button {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--signal);
+  background: var(--accent);
 }
 
 .results-badge[hidden] {
