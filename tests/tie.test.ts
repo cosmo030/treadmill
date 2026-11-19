@@ -142,3 +142,22 @@ describe("pinning", () => {
     }
   });
 });
+
+describe("body jumps", () => {
+  it("a jump between drawn frames only nudges the tie, it doesn't fling it", async () => {
+    const { pinTie } = await import("../src/tie.ts");
+    const tie = createTie(ANCHOR);
+    run(tie, 1);
+    // A stumble pitches the body forward: the collar jumps 12 px on one drawn frame.
+    const moved: Point = [ANCHOR[0] + 12, ANCHOR[1]];
+    pinTie(tie, moved);
+    let highest = Infinity;
+    for (let t = 0; t < 0.5; t += 1 / 60) {
+      stepTie(tie, moved, STILL_AIR, 1 / 60);
+      highest = Math.min(highest, tip(tie)[1]);
+    }
+    // The tip never swings up past the knot, and it's hanging again after half a second.
+    expect(highest).toBeGreaterThan(moved[1]);
+    expect(tip(tie)[0]).toBeCloseTo(moved[0], -1);
+  });
+});

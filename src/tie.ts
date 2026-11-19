@@ -114,10 +114,20 @@ function solve(tie: Tie, anchor: Point, iterations = ITERATIONS): void {
 /**
  * Re-pins the knot right away, without advancing time. Call it whenever the
  * figure's pose jumps (every drawn frame), so the tie never comes off his neck.
- * The jump shows up as a little whip on the next steps.
+ * `carry` is the share of the jump the tie feels as a push: the pose jumps at
+ * the drawing rate (10–20 times a second), so treating the whole jump as one
+ * physics step's worth of velocity would fling the tie about. Same as hangman.
  */
-export function pinTie(tie: Tie, anchor: Point): void {
+export function pinTie(tie: Tie, anchor: Point, carry = 0.15): void {
+  const before = tie.pts.map((p): Vec => [p[0], p[1]]);
   solve(tie, anchor, ITERATIONS * 3);
+  tie.pts.forEach((p, i) => {
+    const b = before[i];
+    const q = tie.prev[i];
+    if (!b || !q) return;
+    q[0] += (p[0] - b[0]) * (1 - carry);
+    q[1] += (p[1] - b[1]) * (1 - carry);
+  });
 }
 
 /** Adds velocity (px/s), more towards the tip: a flick from a stumble or a jump. */
