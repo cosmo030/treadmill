@@ -1,13 +1,15 @@
-// Plays the typing clack. Every variant is synthesised in idle time after the
-// page loads; the AudioContext is created on the first key press (browsers only
-// allow sound after a user gesture, and that's also when the round starts), so
-// a press only has to start a ready-made buffer.
-import { clackParams, pickVariant, synthClack, type ClackKind } from "./clack.ts";
+// Plays the typing sound: single keystrokes cut from a real recording
+// ("keyboard-typing-yellow-switches" by aalorv, CC BY 4.0; see keySprite.ts).
+//
+// The file is fetched and decoded in idle time after the page loads (an
+// OfflineAudioContext can decode before any user gesture). The real
+// AudioContext starts on the first gesture, so a key press only has to start
+// a slice of a ready buffer.
+import { planPress, type ClackKind } from "./clack.ts";
+import { KEY_SPRITE } from "./keySprite.ts";
 
 export const SOUND_KEY = "treadmill.sound";
-const VARIANTS = 6;
-const KINDS: readonly ClackKind[] = ["key", "space", "back", "wrong"];
-const VOLUME = 0.55;
+const VOLUME = 0.7;
 
 /**
  * Sound on or off from the saved choice. Without one: on with a real keyboard,
@@ -24,46 +26,48 @@ export interface KeySound {
   /** Starts audio early on a click or tap, so even the first key press is instant. */
   warm(): void;
   setEnabled(on: boolean): void;
-  /** Plays one clack. Call it from the key event itself, so audio can start. */
+  /** Plays one keystroke. Call it from the key event itself, so audio can start. */
   play(kind: ClackKind): void;
 }
-
-/** Sounds are synthesised at this rate; the AudioContext resamples if its own differs. */
-const SYNTH_RATE = 48_000;
 
 export function createKeySound(initiallyOn: boolean, rng: () => number = Math.random): KeySound {
   let enabled = initiallyOn;
   let ctx: AudioContext | null = null;
   let master: GainNode | null = null;
-  // Raw samples, synthesised in idle time after load so the first key press doesn't wait.
-  const samples = new Map<ClackKind, Float32Array<ArrayBuffer>[]>();
-  const buffers = new Map<ClackKind, AudioBuffer[]>();
+  let sprite: AudioBuffer | null = null;
+  let loading = false;
+  let previewWhenLoaded = false;
   const last = new Map<ClackKind, number>();
 
-  function synth(kind: ClackKind): Float32Array<ArrayBuffer>[] {
-    let list = samples.get(kind);
-    if (!list) {
-      list = [];
-      for (let i = 0; i < VARIANTS; i++) list.push(synthClack(clackParams(kind, rng), SYNTH_RATE, rng));
-      samples.set(kind, list);
-    }
-    return list;
-  }
-
-  /** Synthesises every kind in the background, one per idle slot. */
-  function prepare(): void {
-    const todo = KINDS.filter((k) => !samples.has(k));
+  /** Fetches and decodes the recording once: in idle time, or right away when asked for. */
+  function load(now = false): void {
+    if (sprite || loading) return;
+    loading = true;
     const idle =
-      typeof requestIdleCallback === "function"
-        ? (fn: () => void) => requestIdleCallback(fn, { timeout: 1500 })
-        : (fn: () => void) => window.setTimeout(fn, 50);
-    const next = (): void => {
-      const kind = todo.shift();
-      if (!kind) return;
-      synth(kind);
-      idle(next);
-    };
-    idle(next);
+      now
+        ? (fn: () => void) => fn()
+        : typeof requestIdleCallback === "function"
+          ? (fn: () => void) => requestIdleCallback(fn, { timeout: 1500 })
+          : (fn: () => void) => window.setTimeout(fn, 50);
+    idle(() => {
+      void (async () => {
+        try {
+          const res = await fetch(KEY_SPRITE.url);
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.arrayBuffer();
+          // Any context can decode; an offline one needs no user gesture.
+          const decoder = new OfflineAudioContext(1, 1, 44_100);
+          sprite = await decoder.decodeAudioData(data);
+          if (previewWhenLoaded) {
+            previewWhenLoaded = false;
+            play("key");
+          }
+        } catch {
+          // No sound then; the game works the same without it.
+          loading = false;
+        }
+      })();
+    });
   }
 
   function ensure(): AudioContext | null {
@@ -87,39 +91,31 @@ export function createKeySound(initiallyOn: boolean, rng: () => number = Math.ra
     return ctx;
   }
 
-  function buffersFor(c: AudioContext, kind: ClackKind): AudioBuffer[] {
-    let list = buffers.get(kind);
-    if (!list) {
-      list = synth(kind).map((s) => {
-        const b = c.createBuffer(1, s.length, SYNTH_RATE);
-        b.copyToChannel(s, 0);
-        return b;
-      });
-      buffers.set(kind, list);
-    }
-    return list;
-  }
-
   function play(kind: ClackKind): void {
     if (!enabled) return;
     const c = ensure();
-    if (!c || !master) return;
-    const list = buffersFor(c, kind);
-    const i = pickVariant(list.length, last.get(kind) ?? -1, rng);
-    last.set(kind, i);
-    const buffer = list[i];
-    if (!buffer) return;
+    if (!c || !master || !sprite) return;
+    const press = planPress(kind, KEY_SPRITE, last.get(kind) ?? -1, rng);
+    if (!press) return;
+    last.set(kind, press.index);
     const src = c.createBufferSource();
-    src.buffer = buffer;
-    // A little pitch and level wobble on top of the variants.
-    src.playbackRate.value = 0.95 + rng() * 0.1;
+    src.buffer = sprite;
+    src.playbackRate.value = press.rate;
     const gain = c.createGain();
-    gain.gain.value = 0.8 + rng() * 0.2;
-    src.connect(gain).connect(master);
-    src.start();
+    gain.gain.value = press.gain;
+    let node: AudioNode = src;
+    if (press.lowpass > 0) {
+      const filter = c.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = press.lowpass;
+      node = node.connect(filter);
+    }
+    node.connect(gain).connect(master);
+    const [start, duration] = press.slice;
+    src.start(0, start, duration);
   }
 
-  if (enabled) prepare();
+  if (enabled) load();
 
   return {
     get enabled() {
@@ -130,10 +126,15 @@ export function createKeySound(initiallyOn: boolean, rng: () => number = Math.ra
     },
     setEnabled(on) {
       enabled = on;
-      // Turning it on is a click: a good moment to unlock audio, with a preview clack.
       if (on) {
-        play("key");
-        prepare();
+        // Turning it on is a click: start audio now (allowed during a gesture) and
+        // play a preview, straight away or as soon as the recording has loaded.
+        ensure();
+        if (sprite) play("key");
+        else {
+          previewWhenLoaded = true;
+          load(true);
+        }
       }
     },
     play,

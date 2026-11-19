@@ -1,97 +1,89 @@
 import { describe, expect, it } from "vitest";
-import { CLACK_PEAK, clackFor, clackParams, pickVariant, synthClack, type ClackKind } from "../src/clack.ts";
+import keysWav from "../public/sounds/keys.wav?inline";
+import { clackFor, pickVariant, planPress, VOICINGS } from "../src/clack.ts";
+import { KEY_SPRITE, type Slice } from "../src/keySprite.ts";
+import { soundPreference } from "../src/sound.ts";
 import { seeded } from "./helpers.ts";
 
-const SR = 48_000;
-const KINDS: ClackKind[] = ["key", "space", "back", "wrong"];
-
-/** Energy above `hz`, as a share of the total (rough brightness measure via first differences). */
-function brightness(x: Float32Array): number {
-  let diff = 0;
-  let all = 0;
-  for (let i = 1; i < x.length; i++) {
-    const a = x[i] ?? 0;
-    const b = x[i - 1] ?? 0;
-    diff += (a - b) ** 2;
-    all += a * a;
-  }
-  return diff / (all || 1);
-}
-
-/** Time (s) until the signal stays below `level`. */
-function decayTime(x: Float32Array, level: number): number {
-  let last = 0;
-  for (let i = 0; i < x.length; i++) if (Math.abs(x[i] ?? 0) > level) last = i;
-  return last / SR;
-}
-
-describe("clack synthesis", () => {
-  it("renders a short, normalised clip that starts at once and ends in silence", () => {
-    for (const kind of KINDS) {
-      const x = synthClack(clackParams(kind, seeded(1)), SR, seeded(2));
-      expect(x.length / SR).toBeLessThan(0.2);
-      let peak = 0;
-      for (const v of x) {
-        expect(Number.isFinite(v)).toBe(true);
-        peak = Math.max(peak, Math.abs(v));
-      }
-      expect(peak).toBeCloseTo(CLACK_PEAK, 5);
-      // The attack is within the first couple of milliseconds: no audible lag.
-      let first = 0;
-      while (Math.abs(x[first] ?? 0) < 0.1) first++;
-      expect(first / SR).toBeLessThan(0.002);
-      expect(Math.abs(x[x.length - 1] ?? 1)).toBeLessThan(0.001);
+/** Reads the 16-bit mono WAV the slicing script writes (inlined by Vite as a data URL). */
+function readWav(dataUrl: string): { sampleRate: number; channels: number; samples: Float32Array } {
+  const bin = atob(dataUrl.slice(dataUrl.indexOf(",") + 1));
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  const view = new DataView(bytes.buffer);
+  const ascii = (from: number, to: number): string => String.fromCharCode(...bytes.subarray(from, to));
+  expect(ascii(0, 4)).toBe("RIFF");
+  expect(ascii(8, 12)).toBe("WAVE");
+  let off = 12;
+  let sampleRate = 0;
+  let channels = 0;
+  let bits = 0;
+  while (off < bytes.length) {
+    const id = ascii(off, off + 4);
+    const size = view.getUint32(off + 4, true);
+    if (id === "fmt ") {
+      channels = view.getUint16(off + 10, true);
+      sampleRate = view.getUint32(off + 12, true);
+      bits = view.getUint16(off + 22, true);
     }
+    if (id === "data") {
+      expect(bits).toBe(16);
+      const n = size / 2;
+      const samples = new Float32Array(n);
+      for (let i = 0; i < n; i++) samples[i] = view.getInt16(off + 8 + i * 2, true) / 32768;
+      return { sampleRate, channels, samples };
+    }
+    off += 8 + size + (size % 2);
+  }
+  throw new Error("no data chunk");
+}
+
+const wav = readWav(keysWav);
+const all: Slice[] = [...KEY_SPRITE.key, ...KEY_SPRITE.space];
+
+describe("the recorded keystrokes", () => {
+  it("is a mono WAV that matches the generated slice list", () => {
+    expect(wav.channels).toBe(1);
+    expect(wav.sampleRate).toBe(44_100);
+    expect(wav.samples.length / wav.sampleRate).toBeCloseTo(KEY_SPRITE.length, 2);
+    expect(KEY_SPRITE.key.length).toBeGreaterThanOrEqual(6);
+    expect(KEY_SPRITE.space.length).toBeGreaterThanOrEqual(3);
   });
 
-  it("varies from one variant to the next", () => {
-    const rng = seeded(4);
-    const a = synthClack(clackParams("key", rng), SR, rng);
-    const b = synthClack(clackParams("key", rng), SR, rng);
-    let diff = 0;
-    for (let i = 0; i < Math.min(a.length, b.length); i++) diff += Math.abs((a[i] ?? 0) - (b[i] ?? 0));
-    expect(diff).toBeGreaterThan(10);
+  it("has short slices inside the file that don't overlap", () => {
+    const sorted = [...all].sort((a, b) => a[0] - b[0]);
+    let prevEnd = 0;
+    for (const [start, dur] of sorted) {
+      expect(dur).toBeGreaterThan(0.07);
+      expect(dur).toBeLessThan(0.2);
+      expect(start).toBeGreaterThanOrEqual(prevEnd);
+      prevEnd = start + dur;
+    }
+    expect(prevEnd).toBeLessThanOrEqual(KEY_SPRITE.length);
   });
 
-  it("has an upstroke click after the downstroke", () => {
-    const p = clackParams("key", seeded(7));
-    const x = synthClack(p, SR, seeded(8));
-    const at = Math.round(p.releaseAt * SR);
-    let before = 0;
-    let after = 0;
-    for (let i = at - 120; i < at; i++) before = Math.max(before, Math.abs(x[i] ?? 0));
-    for (let i = at; i < at + 120; i++) after = Math.max(after, Math.abs(x[i] ?? 0));
-    expect(after).toBeGreaterThan(before * 1.5);
-  });
-
-  it("makes a typo duller than a correct letter, and the space bar ring longer", () => {
-    const avg = (kind: ClackKind, f: (x: Float32Array) => number): number => {
-      let s = 0;
-      for (let i = 0; i < 8; i++) s += f(synthClack(clackParams(kind, seeded(10 + i)), SR, seeded(20 + i)));
-      return s / 8;
-    };
-    expect(avg("wrong", brightness)).toBeLessThan(avg("key", brightness) * 0.6);
-    expect(avg("space", (x) => decayTime(x, 0.05))).toBeGreaterThan(avg("key", (x) => decayTime(x, 0.05)));
+  it("starts every slice right on its keystroke (no lag) and fades it out", () => {
+    const SR = wav.sampleRate;
+    for (const [start, dur] of all) {
+      const s = Math.round(start * SR);
+      const e = Math.round((start + dur) * SR);
+      let peakAt = s;
+      let peak = 0;
+      for (let i = s; i < e; i++) {
+        const v = Math.abs(wav.samples[i] ?? 0);
+        if (v > peak) {
+          peak = v;
+          peakAt = i;
+        }
+      }
+      expect(peak).toBeGreaterThan(0.2);
+      expect(peak).toBeLessThan(0.97); // levelled, never clipped
+      expect((peakAt - s) / SR).toBeLessThan(0.01); // the hit is the first thing you hear
+      expect(Math.abs(wav.samples[e - 1] ?? 1)).toBeLessThan(0.01); // faded, no click at the end
+    }
   });
 });
 
-describe("picking sounds", () => {
-  it("never plays the same variant twice in a row", () => {
-    const rng = seeded(3);
-    let last = -1;
-    const seen = new Set<number>();
-    for (let i = 0; i < 2000; i++) {
-      const v = pickVariant(6, last, rng);
-      expect(v).not.toBe(last);
-      expect(v).toBeGreaterThanOrEqual(0);
-      expect(v).toBeLessThan(6);
-      seen.add(v);
-      last = v;
-    }
-    expect(seen.size).toBe(6);
-    expect(pickVariant(1, 0, rng)).toBe(0);
-  });
-
+describe("which sound plays", () => {
   it("maps keys to sounds, clacking even when the game ignores the key", () => {
     expect(clackFor("char", "correct")).toBe("key");
     expect(clackFor("char", "wrong")).toBe("wrong");
@@ -100,10 +92,47 @@ describe("picking sounds", () => {
     expect(clackFor("backspace", "deleted")).toBe("back");
     expect(clackFor("clearWord", "ignored")).toBe("back");
   });
+
+  it("never plays the same keystroke twice in a row", () => {
+    const rng = seeded(3);
+    let last = -1;
+    const seen = new Set<number>();
+    for (let i = 0; i < 2000; i++) {
+      const v = pickVariant(8, last, rng);
+      expect(v).not.toBe(last);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(8);
+      seen.add(v);
+      last = v;
+    }
+    expect(seen.size).toBe(8);
+    expect(pickVariant(1, 0, rng)).toBe(0);
+  });
+
+  it("plays the space bar from its own slices, and a typo lower and muffled", () => {
+    const rng = seeded(5);
+    for (let i = 0; i < 50; i++) {
+      const space = planPress("space", KEY_SPRITE, -1, rng);
+      expect(KEY_SPRITE.space).toContain(space?.slice);
+      const wrong = planPress("wrong", KEY_SPRITE, -1, rng);
+      const key = planPress("key", KEY_SPRITE, -1, rng);
+      const back = planPress("back", KEY_SPRITE, -1, rng);
+      if (!wrong || !key || !back) throw new Error("no press");
+      expect(KEY_SPRITE.key).toContain(wrong.slice);
+      expect(wrong.rate).toBeLessThan(key.rate);
+      expect(wrong.lowpass).toBeGreaterThan(0);
+      expect(key.lowpass).toBe(0);
+      expect(back.rate).toBeGreaterThan(key.rate);
+    }
+    expect(VOICINGS.wrong.lowpass).toBeLessThan(3000);
+  });
+
+  it("returns nothing when there are no slices", () => {
+    expect(planPress("key", { key: [], space: [] }, -1, seeded(1))).toBeNull();
+  });
 });
 
-describe("sound preference", async () => {
-  const { soundPreference } = await import("../src/sound.ts");
+describe("sound preference", () => {
   it("is on with a keyboard and off on touch screens by default, and remembers a choice", () => {
     expect(soundPreference(null, false)).toBe(true);
     expect(soundPreference(null, true)).toBe(false);

@@ -533,6 +533,12 @@ button {
   text-align: center;
 }
 
+/* The sound credit sits right under the links, a little quieter. */
+.page .footnote.credit {
+  margin-top: -10px;
+  color: var(--muted);
+}
+
 .footnote a {
   padding-bottom: 2px;
   border-bottom: 1px solid var(--line);
