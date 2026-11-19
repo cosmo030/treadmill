@@ -12,6 +12,7 @@ Play it at [treadmill.cosmo030.com](https://treadmill.cosmo030.com). Companion g
 - **The runner's speed follows your live WPM**: standing (and blinking) at 0, walking under 30, jogging to 60, running and leaning forward to 90, sprinting with a sweatband and speed lines above that. The gait blends smoothly between speeds, but the frames step through six keyframes like a flipbook.
 - **Every wrong letter is a stumble.** The figure pitches forward, flails, and catches itself on an overshoot spring (~350 ms). Three typos within 1.5 s make a bigger stumble with a panicked face. A new typo restarts the stumble instead of stacking.
 - **The tie** is the mascot's signature and the only coloured thing on him, in cosmo030.com's orange (`#ff5a1f`, `--accent`). It's a chain of four points simulated with verlet physics (gravity, drag, wind, a flutter that travels down it), pinned at his collar and drawn through those points with Rough.js. It sways when he stands, trails and flaps while he walks and runs (faster with his speed), flips over his shoulder and streams behind at a sprint, whips into his face when he trips, hangs limp while he pants and swings up with his arms when he wins. With reduced motion it just hangs and tilts with his pose.
+- **Sound: one thing only, the keyboard.** Every key press makes a mechanical clack, synthesised in code (`src/clack.ts`): a contact click, the plastic body of the key, a short low "thock" as it bottoms out and a softer click as it springs back. Space is deeper with a little stabiliser rattle, backspace is lighter, and a typo sounds duller, so you can hear a mistake. Six random variants per key plus a slight pitch and level wobble, so it never sounds like a loop. The sounds are made while the browser is idle after load and audio starts on your first key, so presses play instantly. The ♪ button in the title bar mutes it (remembered); it's off by default on phones, whose keyboards usually click already.
 - **At the end** the treadmill winds down and the figure bends over panting, or throws its arms up if you set a new personal best.
 - Drawn with [Rough.js](https://roughjs.com) on a `<canvas>`, redrawn about 10 times a second with cycling seeds so the lines "boil", like [hangman](https://hangman.cosmo030.com). With `prefers-reduced-motion`, the boil, shaking and dust are gone and the stride is slow and simple; the console and running vs standing still show.
 
@@ -55,6 +56,8 @@ src/
   runner.ts    Rough.js drawing: treadmill, LCD console, figure, stumbles
   tie.ts       the tie's verlet physics (chain, forces, reduced-motion pose)
   spring.ts    overshoot spring (ported from hangman)
+  clack.ts     the key sounds, synthesised sample by sample (pure functions)
+  sound.ts     Web Audio playback, mute setting
   results.ts   personal best + share text
   types.ts     shared types
 tests/         unit tests

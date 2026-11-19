@@ -3,7 +3,9 @@
 import "./style.css";
 import { Game } from "./game.ts";
 import { createBestStore, shareText } from "./results.ts";
+import { clackFor } from "./clack.ts";
 import { createRunner } from "./runner.ts";
+import { createKeySound, SOUND_KEY, soundPreference } from "./sound.ts";
 import type { KeyInput, KeyOutcome, RunnerInput, Stats } from "./types.ts";
 import { letterStates, type TypingSession } from "./typing.ts";
 
@@ -36,9 +38,11 @@ const el = {
   hint: $("hint"),
   status: $("status"),
   theme: $<HTMLButtonElement>("theme"),
+  sound: $<HTMLButtonElement>("sound"),
 };
 
 const coarse = matchMedia("(pointer: coarse)").matches;
+const sound = createKeySound(soundPreference(readSetting(SOUND_KEY), coarse));
 const game = new Game();
 const best = createBestStore(safeStorage());
 let newBest = false;
@@ -151,6 +155,8 @@ function press(input: KeyInput): void {
     finish();
     return;
   }
+  // A real keyboard clacks even when the game ignores the key (e.g. space on an empty word).
+  sound.play(clackFor(input.kind, outcome));
   if (outcome === "ignored") return;
   if (outcome === "wrong") runner.stumble();
   words.update(game.session);
@@ -322,7 +328,7 @@ el.typing.addEventListener("pointerdown", (e) => {
 });
 
 // Buttons shouldn't steal focus from the input on click, so typing carries on.
-for (const b of [el.restart, el.theme, el.share, el.again]) {
+for (const b of [el.restart, el.theme, el.sound, el.share, el.again]) {
   b.addEventListener("mousedown", (e) => e.preventDefault());
 }
 
@@ -426,6 +432,41 @@ function syncThemeButton(): void {
   runner.redraw();
 }
 
+// ---------------------------------------------------------------------------
+// Typing sound toggle
+// ---------------------------------------------------------------------------
+
+function syncSoundButton(): void {
+  el.sound.setAttribute("aria-pressed", String(sound.enabled));
+  el.sound.title = sound.enabled ? "typing sound: on" : "typing sound: off";
+}
+
+// Audio can only start after a gesture. If one comes before the first key (a
+// click, or the tap that opens a phone keyboard), start it then.
+window.addEventListener("pointerdown", () => sound.warm(), { once: true, capture: true });
+
+el.sound.addEventListener("click", () => {
+  sound.setEnabled(!sound.enabled);
+  writeSetting(SOUND_KEY, sound.enabled ? "on" : "off");
+  syncSoundButton();
+});
+
+function readSetting(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeSetting(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Applies for this visit only.
+  }
+}
+
 el.theme.addEventListener("click", () => {
   const next = currentTheme() === "dark" ? "light" : "dark";
   document.documentElement.dataset.theme = next;
@@ -455,6 +496,7 @@ function safeStorage(): Storage | null {
 words.reset(game.session);
 syncHint();
 syncThemeButton();
+syncSoundButton();
 // Re-measure once the web font has loaded (letter widths change).
 document.fonts?.ready.then(() => words.place(game.session)).catch(() => {});
 window.addEventListener("resize", () => words.place(game.session));

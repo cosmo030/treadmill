@@ -162,6 +162,26 @@ button {
   background: var(--panel);
 }
 
+/* Typing sound toggle: a note, struck through when off. */
+.tb-sound {
+  position: relative;
+}
+
+.tb-sound[aria-pressed="false"] {
+  color: var(--ink-2);
+}
+
+.tb-sound[aria-pressed="false"]::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 16px;
+  height: 1px;
+  background: currentColor;
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
 .tb-deco {
   color: var(--ink-2);
 }
