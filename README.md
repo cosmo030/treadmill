@@ -34,6 +34,10 @@ npm test            # Vitest unit tests
 npm run build       # typecheck + production build into dist/
 ```
 
+## Deploy
+
+Live at [treadmill.cosmo030.com](https://treadmill.cosmo030.com). The repo is connected to Vercel: pushes to `main` deploy to production, other branches get preview deployments. It's a static Vite build, so no environment variables are needed.
+
 ## Stack
 
 TypeScript (strict, `noUncheckedIndexedAccess`), Vite, Rough.js, Vitest. Static site on Vercel.
