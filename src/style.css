@@ -1,0 +1,532 @@
+/* Same look as hangman (and cosmo030.com): warm grey ground, near-black ink,
+   small monospace, lowercase copy, hairlines, one orange accent. */
+
+:root {
+  --ground: #9b9b98;
+  --ink: #121212;
+  --ink-2: #2a2a28;
+  --muted: #4a4a47;
+  --untyped: #545451;
+  --line: rgb(18 18 18 / 0.35);
+  --line-soft: rgb(18 18 18 / 0.18);
+  --panel: rgb(18 18 18 / 0.06);
+  --signal: #ff5a1f;
+  --lcd-bg: #a9af98;
+  --lcd-ink: #1b2014;
+  --font: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #141413;
+    --ink: #e6e5df;
+    --ink-2: #c4c3bc;
+    --muted: #9a9993;
+    --untyped: #73726d;
+    --line: rgb(230 229 223 / 0.32);
+    --line-soft: rgb(230 229 223 / 0.14);
+    --panel: rgb(230 229 223 / 0.06);
+    --lcd-bg: #23271f;
+    --lcd-ink: #c8d4ae;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #141413;
+  --ink: #e6e5df;
+  --ink-2: #c4c3bc;
+  --muted: #9a9993;
+  --untyped: #73726d;
+  --line: rgb(230 229 223 / 0.32);
+  --line-soft: rgb(230 229 223 / 0.14);
+  --panel: rgb(230 229 223 / 0.06);
+  --lcd-bg: #23271f;
+  --lcd-ink: #c8d4ae;
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background: var(--ground);
+  color: var(--ink);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100svh;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+button,
+a {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: var(--ink);
+  color: var(--ground);
+}
+
+/* --- page + window frame ---------------------------------------------- */
+
+.page {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+}
+
+.frame {
+  width: min(100%, 620px);
+  border: 1px solid var(--ink);
+  background: var(--ground);
+  box-shadow: 4px 4px 0 var(--line-soft);
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 34px;
+  padding: 0 4px 0 12px;
+  border-bottom: 1px solid var(--ink);
+}
+
+.title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cursor {
+    animation: blink 1.06s steps(1) infinite;
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.titlebar-btns {
+  display: flex;
+  align-items: center;
+}
+
+.tb-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-decoration: none;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.tb-btn:not(.tb-deco):hover {
+  background: var(--panel);
+}
+
+.tb-deco {
+  color: var(--ink-2);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 12px 16px 14px;
+}
+
+/* --- scene ------------------------------------------------------------ */
+
+.scene {
+  display: block;
+  /* Shrinks on short screens so the words stay in view. */
+  width: min(100%, 520px, calc(38svh * 480 / 232));
+  aspect-ratio: 480 / 232;
+  margin: 0 auto;
+}
+
+/* --- typing area ------------------------------------------------------ */
+
+.typing {
+  --size: 19px;
+  --lh: 1.7;
+  position: relative;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  font-size: var(--size);
+  line-height: var(--lh);
+  cursor: text;
+}
+
+.viewport {
+  position: relative;
+  height: calc(var(--size) * var(--lh) * 3);
+  overflow: hidden;
+}
+
+.words {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.62em;
+  transition: transform 160ms ease-out;
+  will-change: transform;
+}
+
+.word {
+  position: relative;
+  color: var(--untyped);
+  white-space: nowrap;
+}
+
+.word.current {
+  background: var(--panel);
+  box-shadow: 0 -2px 0 var(--panel), 0 2px 0 var(--panel);
+}
+
+/* A finished word with a mistake: wavy orange underline. */
+.word.bad {
+  text-decoration: underline wavy var(--signal);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 5px;
+}
+
+.l.correct {
+  color: var(--ink);
+}
+
+/* Wrong letters: ink on an orange block, readable in both themes. */
+.l.wrong,
+.l.extra {
+  background: var(--signal);
+  color: #121212;
+}
+
+.l.extra {
+  opacity: 0.7;
+}
+
+.caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: calc(var(--size) * 1.25);
+  margin-top: calc(var(--size) * (var(--lh) - 1.25) / 2);
+  background: var(--ink);
+  pointer-events: none;
+  transition: transform 70ms linear;
+  z-index: 1;
+}
+
+.typing:not(.is-typing) .caret {
+  animation: blink 1.06s steps(1) infinite;
+}
+
+.is-finished .caret {
+  display: none;
+}
+
+/* The real input: invisible, laid over the words so a tap focuses it and opens
+   the phone keyboard. 16px+ so iOS doesn't zoom in. */
+.input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  font-size: 16px;
+  color: transparent;
+  background: transparent;
+  caret-color: transparent;
+  cursor: text;
+  z-index: 2;
+}
+
+.is-finished .input {
+  pointer-events: none;
+}
+
+.focus-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  border: 0;
+  background: color-mix(in srgb, var(--ground) 55%, transparent);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  font-size: 13px;
+}
+
+.focus-overlay[hidden] {
+  display: none;
+}
+
+.focus-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--ink);
+  background: var(--ground);
+}
+
+.focus-label::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+
+/* --- results ---------------------------------------------------------- */
+
+.is-finished .viewport {
+  display: none;
+}
+
+.results {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+  cursor: default;
+}
+
+.results[hidden] {
+  display: none;
+}
+
+.results p {
+  margin: 0;
+}
+
+.results-wpm {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.results-wpm strong {
+  font-size: 48px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+
+.results-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.results-badge::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+
+.results-badge[hidden] {
+  display: none;
+}
+
+.results-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 20px;
+  margin: 6px 0 10px;
+  color: var(--ink-2);
+}
+
+.results-stats div {
+  display: flex;
+  gap: 6px;
+}
+
+.results-stats dt::after {
+  content: ":";
+}
+
+.results-stats dd {
+  margin: 0;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.results-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.results-note {
+  min-height: 20px;
+  color: var(--ink-2);
+}
+
+/* --- buttons ---------------------------------------------------------- */
+
+.btn {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  background: transparent;
+  text-transform: lowercase;
+  touch-action: manipulation;
+}
+
+.btn:hover {
+  background: var(--panel);
+}
+
+.btn-primary {
+  min-height: 40px;
+  padding: 0 18px;
+  background: var(--ink);
+  color: var(--ground);
+}
+
+.btn-primary:hover {
+  background: var(--ink-2);
+}
+
+.btn-small {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+/* --- hint row --------------------------------------------------------- */
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.hint {
+  margin: 0;
+  color: var(--ink-2);
+}
+
+@media (pointer: coarse) {
+  .hint-keys {
+    display: none;
+  }
+}
+
+/* --- small and short screens ----------------------------------------- */
+
+@media (max-width: 420px) {
+  .body {
+    padding: 10px 10px 12px;
+  }
+
+  .typing {
+    --size: 17px;
+    padding: 6px 8px;
+  }
+}
+
+/* Phone keyboard open (or a landscape phone): squeeze the scene. */
+@media (max-height: 560px) {
+  .page {
+    justify-content: flex-start;
+    gap: 8px;
+    padding-top: max(8px, env(safe-area-inset-top));
+  }
+
+  .scene {
+    width: min(100%, calc(30svh * 480 / 232));
+  }
+
+  .typing {
+    margin-top: 6px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .words,
+  .caret {
+    transition: none;
+  }
+}
+
+.footnote {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 11px;
+  text-align: center;
+}
+
+.footnote a {
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+  text-decoration: none;
+}
+
+.noscript {
+  text-align: center;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

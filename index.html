@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <title>treadmill · cosmo030</title>
+    <meta name="description" content="A 30-second typing test. A scribbly stick figure runs on a treadmill as fast as you type, and trips over every typo. By Cosmo Braun (@cosmo030)." />
+    <meta name="theme-color" content="#9b9b98" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141413" media="(prefers-color-scheme: dark)" />
+    <link rel="canonical" href="https://treadmill.cosmo030.com/" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://treadmill.cosmo030.com/" />
+    <meta property="og:site_name" content="cosmo030" />
+    <meta property="og:title" content="treadmill · how fast can you type?" />
+    <meta property="og:description" content="A 30-second typing test. The stick figure runs as fast as you type, and trips over every typo." />
+    <meta property="og:image" content="https://treadmill.cosmo030.com/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="A hand-drawn stick figure sprinting on a treadmill with a little LCD console showing its speed" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="treadmill · how fast can you type?" />
+    <meta name="twitter:description" content="A 30-second typing test. The stick figure runs as fast as you type, and trips over every typo." />
+    <meta name="twitter:image" content="https://treadmill.cosmo030.com/og.png" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <script>
+      // Apply the saved theme before first paint so it never flashes.
+      (function () {
+        try {
+          var t = localStorage.getItem("treadmill.theme");
+          if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <main class="page">
+      <section class="frame" aria-labelledby="title">
+        <header class="titlebar">
+          <h1 id="title" class="title">treadmill<span class="cursor" aria-hidden="true">_</span></h1>
+          <div class="titlebar-btns">
+            <button type="button" class="tb-btn" id="theme" aria-label="Switch to dark theme" title="theme">
+              <span aria-hidden="true">◐</span>
+            </button>
+            <span class="tb-btn tb-deco" aria-hidden="true">□</span>
+            <a class="tb-btn" href="https://cosmo030.com" aria-label="Close, back to cosmo030.com" title="cosmo030.com">×</a>
+          </div>
+        </header>
+
+        <div class="body">
+          <canvas
+            id="scene"
+            class="scene"
+            role="img"
+            aria-label="A hand-drawn stick figure on a treadmill. It runs as fast as you type and trips on typos."
+          ></canvas>
+
+          <div class="typing" id="typing">
+            <div class="viewport" id="viewport" aria-hidden="true">
+              <div class="words" id="words"><span class="caret" id="caret"></span></div>
+            </div>
+            <input
+              id="input"
+              class="input"
+              type="text"
+              inputmode="text"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="none"
+              spellcheck="false"
+              enterkeyhint="go"
+              aria-label="Type the words shown. The timer starts on the first letter."
+              aria-describedby="hint"
+            />
+            <button type="button" class="focus-overlay" id="focus-overlay" hidden>
+              <span class="focus-label" id="focus-label">click here to type</span>
+            </button>
+
+            <div class="results" id="results" hidden>
+              <p class="results-wpm"><strong id="r-wpm">0</strong> <span>wpm</span></p>
+              <p class="results-badge" id="r-best-badge" hidden>new best!</p>
+              <dl class="results-stats">
+                <div><dt>accuracy</dt><dd id="r-acc">0%</dd></div>
+                <div><dt>stumbles</dt><dd id="r-stumbles">0</dd></div>
+                <div><dt>best</dt><dd id="r-best">0</dd></div>
+              </dl>
+              <div class="results-actions">
+                <button type="button" class="btn" id="share">share</button>
+                <button type="button" class="btn btn-primary" id="again">again <span aria-hidden="true">→</span></button>
+              </div>
+              <p class="results-note" id="share-note" role="status" aria-live="polite"></p>
+            </div>
+          </div>
+
+          <div class="row">
+            <p class="hint" id="hint">start typing…<span class="hint-keys"> · tab to restart</span></p>
+            <button type="button" class="btn btn-small" id="restart">restart</button>
+          </div>
+          <p class="sr-only" id="status" role="status" aria-live="polite"></p>
+        </div>
+      </section>
+
+      <p class="footnote">also play: <a href="https://hangman.cosmo030.com">hangman</a> · <a href="https://cosmo030.com">cosmo030.com</a></p>
+    </main>
+    <noscript><p class="noscript">this game needs javascript.</p></noscript>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
